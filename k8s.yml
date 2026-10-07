@@ -1,0 +1,94 @@
+# Volumen compartido (Azure Files) para los archivos subidos
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: api-archivo-pvc
+  namespace: mesa-partes
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: azurefile-csi
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-archivo
+  namespace: mesa-partes
+  labels:
+    app: api-archivo
+    env: ${ENV}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-archivo
+  template:
+    metadata:
+      labels:
+        app: api-archivo
+        env: ${ENV}
+    spec:
+      containers:
+        - name: api-archivo
+          image: ${IMAGE}
+          ports:
+            - containerPort: 8087
+          envFrom:
+            - configMapRef:
+                name: mdpv-config
+          env:
+            - name: DB_URL
+              value: "jdbc:mysql://$(DB_HOST):3306/db_archivo?sslMode=REQUIRED&serverTimezone=UTC"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mdpv-secrets
+                  key: DB_PASSWORD
+            - name: FILE_UPLOAD_DIR
+              value: "/data/archivos"
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=75.0"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+          # Margen de arranque de Spring Boot
+          startupProbe:
+            tcpSocket:
+              port: 8087
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: 8087
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8087
+            periodSeconds: 20
+          volumeMounts:
+            - name: archivos
+              mountPath: /data/archivos
+      volumes:
+        - name: archivos
+          persistentVolumeClaim:
+            claimName: api-archivo-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-archivo
+  namespace: mesa-partes
+spec:
+  type: ClusterIP
+  selector:
+    app: api-archivo
+  ports:
+    - port: 8087
+      targetPort: 8087
